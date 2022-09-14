@@ -1,0 +1,19 @@
+[package]
+name = "kite"
+version = "0.1.0"
+edition = "2021"
+description = "Minecraft server multiplexer"
+readme = "README.md"
+repository = "https://github.com/hiraginoyuki/kite"
+authors = [ "Yuki Hiragino <yuki@shiina.family>" ]
+categories = [ "network-programming" ]
+license = "MIT"
+
+[dependencies]
+async-trait = "0.1"
+atty = "0.2"
+clap = { version = "3", features = ["derive"] }
+mc-varint = "0.1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["net", "macros", "rt-multi-thread", "io-util"] }
+toml = "0.5"
