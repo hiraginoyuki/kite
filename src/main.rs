@@ -1,10 +1,10 @@
-use std::{net::SocketAddr, io, sync::Arc};
-
 use clap::Parser;
 use kite::config::{Args, Config};
-use tokio::io::copy_bidirectional;
-use tokio::net::TcpListener;
-use tokio::net::TcpStream;
+use std::{io, net::SocketAddr, sync::Arc};
+use tokio::{
+    io::copy_bidirectional,
+    net::{TcpListener, TcpStream},
+};
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +23,9 @@ async fn main() {
         [[rules]]
         host = "127.0.0.1"
         backend = "127.0.0.1:25566"
-    "#.parse().unwrap();
+    "#
+    .parse()
+    .unwrap();
 
     println!("args: {args:?}");
     println!("config: {config:?}");
