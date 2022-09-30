@@ -49,7 +49,6 @@ impl From<i32> for VarInt {
     }
 }
 
-#[async_trait]
 impl<R: AsyncRead> VarIntAsyncReadExt for R {}
 #[async_trait]
 pub trait VarIntAsyncReadExt: AsyncRead {
@@ -97,7 +96,6 @@ pub trait VarIntAsyncReadExt: AsyncRead {
     }
 }
 
-#[async_trait]
 impl<W: AsyncWrite> VarIntAsyncWriteExt for W {}
 #[async_trait]
 pub trait VarIntAsyncWriteExt: AsyncWrite {
