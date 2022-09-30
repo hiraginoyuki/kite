@@ -23,6 +23,14 @@ pub struct Args {
     pub fancy: bool,
 }
 
+impl FromStr for Config {
+    type Err = toml::de::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        toml::de::from_str(s)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub bind_addr: SocketAddr,
@@ -34,12 +42,4 @@ pub struct Config {
 pub struct Rule {
     pub host: String,
     pub backend: SocketAddr,
-}
-
-impl FromStr for Config {
-    type Err = toml::de::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        toml::de::from_str(s)
-    }
 }
