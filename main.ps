@@ -1,0 +1,184 @@
+fn main() {
+    let args = Args::parse();
+
+    loop {
+        let config: Config = match load_config() {
+            Ok(str) => match str.parse() {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("{e}");
+                    args.config_path.watch().await;
+                    continue;
+                }
+            }
+            Err(notfound) => if {
+                args.config.path
+            }
+            Err() => {}
+        }
+
+        let mut watcher = args.config_path.watch();
+        let listener = TcpListener::bind(&config.bind_addr);
+        let (tx, rx) = mpmc::channel(1);
+        
+        loop {
+            select! {
+                _ = watcher => {
+                    println!("[init] config change detected; reloading");
+                    tx.send(HandlerMsg::RequestStop).await;
+                    break;
+                }
+                maybe_conn = listener.accept() => match maybe_conn {
+                    Ok((conn, peer)) => tokio::spawn(handle_connection()),
+                    Err(e) => {
+                        eprintln!("[warn] fafafa - {e}");
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+}
+
+use HandlerMsg::*;
+enum HandlerMsg {
+    RequestStop,
+}
+
+async fn handle_connection(args, config, mut client, peer, msg_channel: mpmc::Receiver) {
+    let packet = client.read_mc_packet()?;
+    let server = config.get(&packet);
+    let server = TcpStream::connect(server)?;
+    let proxy = tokio::copy_bidirectional(&mut client, &mut server);
+
+    server.write(packet).await?;
+
+    select! {
+        msg = msg_channel.recv() => match {
+            RequestStop => return
+        }
+        _ = proxy => return
+    }
+}
+
+// async fn watch_file(
+//     path: impl AsRef<Path>,
+//     is_desired: impl FnMut(Result<Event>) -> bool,
+// ) -> Result<Event> {
+//     let (tx, mut rx) = mpsc::unbounded_channel();
+//     let watcher = notify::recommended_watcher(tx)?;
+//
+//     loop {
+//         let maybe_event = rx.recv().await;
+//         if is_desired(maybe_event) {
+//             break maybe_event;
+//         }
+//     }
+// }
+
+// #[tokio::main]
+// async fn main() {
+//     let args = Args::parse();
+// 
+//     eprintln!("[init] args: {:?}", args);
+//     eprintln!("");
+// 
+//     loop {
+//         // if file is not accesible in any way, tell what to do and wait for io event
+//         // conds:
+//         //   - desc: target is not a file
+//         //     expr:
+//         //   - desc: file doesn't exist in the directory
+//         //     expr:
+//         //   - desc: parent directory doesn't exist
+//         //     expr:
+//         //   - desc: permission is not enough to read the content
+//         //     expr:
+//         let meta = OpenOptions::new().read(true).open(&args.config_path);
+// 
+//         match meta {
+//             Err(e) => e.kind(),
+//             _ => todo!("unhandled metadata"),
+//         };
+// 
+//         // if watcher == None {
+//         //     watcher = Some(get_watcher().unwrap())
+//         // }
+// 
+//         // select! {
+//         //     _ = watcher.unwrap() => {}
+//         // }
+//     }
+// }
+
+// async fn handle_connection(config: Arc<Config>, mut client: TcpStream, peer: SocketAddr) {
+//     let rule = &config.rules[0];
+// 
+//     let mut server = TcpStream::connect(rule.backend)
+//         .await
+//         .unwrap_or_else(|_| todo!("handle backend connection failure (maybe retry)"));
+// 
+//     eprintln!("[conn] {} -> (kite) -> {}", peer, rule.backend);
+// 
+//     let packet = client.read_mc_packet().await.unwrap();
+//     // let mut cur = Cursor::new(packet.as_inner());
+// 
+//     if let Err(e) = copy_bidirectional(&mut client, &mut server).await {
+//         eprintln!("[warn] while proxying (tokio::io::copy_bidirectional) - {e}");
+//     };
+// }
+
+// let get_watcher = || {
+//     watch_file(args.config_path.borrow(), |maybe_event| {
+//         maybe_event
+//             .map(|event| event.kind.is_modify())
+//             .unwrap_or(false)
+//     })
+// };
+
+// let mut watcher = None::<_>;
+
+// let config: Arc<Config> = Arc::new(
+//     r#"
+//     bind_addr = "0.0.0.0:25555"
+//
+//     [[rules]]
+//     host = "127.1"
+//     backend = "127.0.0.1:25565"
+//
+//     [[rules]]
+//     host = "127.0.0.1"
+//     backend = "127.0.0.1:25566"
+// "#
+//     .parse()
+//     .unwrap(),
+// );
+
+// eprintln!("[init] config: {:?}", config);
+// eprintln!("[init] bound: {} -> (kite)", config.bind_addr);
+// eprintln!("");
+
+// let mut config: Arc<Config>;
+
+// loop {
+//     config = Arc::new({
+//         let config = fs::read_to_string(&args.config_path).unwrap(); // print what to fix and wait for next io notification
+//         let config = config.parse().unwrap(); // also do that when there is a syntax error
+//         config
+//     })
+// }
+
+// loop {
+//     let listener = match TcpListener::bind(config.bind_addr).await {
+//         Ok(listener) => listener,
+//     };
+//
+//     loop {
+//         select! {
+//             connection = listener.accept() => match connection {
+//                 Ok((client, peer)) => tokio::spawn(handle_connection(config.clone(), client, peer)),
+//                 Err(e) => println!("[conn] error accepting - {:?}", e)
+//             }
+//         }
+//     }
+// }

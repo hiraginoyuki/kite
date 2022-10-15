@@ -5,6 +5,13 @@ pub struct VarInt {
     len: usize,
     inner: [u8; 5],
 }
+
+impl VarInt {
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+}
+
 impl Default for VarInt {
     fn default() -> Self {
         VarInt {
@@ -14,8 +21,20 @@ impl Default for VarInt {
     }
 }
 
+impl AsRef<[u8; 5]> for VarInt {
+    fn as_ref(&self) -> &[u8; 5] {
+        &self.inner
+    }
+}
+
+impl AsRef<[u8]> for VarInt {
+    fn as_ref(&self) -> &[u8] {
+        &self.inner[..self.len]
+    }
+}
+
 impl From<&VarInt> for i32 {
-    fn from(var_int: &VarInt) -> i32 {
+    fn from(var_int: &VarInt) -> Self {
         let mut result = 0u32;
 
         for i in 0..5 {
@@ -25,7 +44,7 @@ impl From<&VarInt> for i32 {
             }
         }
 
-        result as i32
+        result as Self
     }
 }
 impl From<i32> for VarInt {

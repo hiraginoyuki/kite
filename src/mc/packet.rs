@@ -7,12 +7,11 @@ use crate::utils::ranging::{RangeCmp, Ranging::*};
 use async_trait::async_trait;
 
 pub struct McPacketRaw {
-    inner: Vec<u8>,
-    idx_id: usize,
-    idx_data: usize,
+    id: usize,
+    data: Vec<u8>,
 }
 impl McPacketRaw {
-    pub const MAX_LEN: usize = !(!0 << 28); // 28 bits
+    pub const MAX_LEN: usize = !(!0 << 21); // 21 bits
 }
 
 #[async_trait]
@@ -25,25 +24,23 @@ pub trait McPacketAsyncReadExt: AsyncRead {
             Ok(len) => match (0..=McPacketRaw::MAX_LEN as i32).ranging(&(&len).into()) {
                 Contained => Ok(len),
                 LessThanStart | GreaterThanEnd => {
-                    return Err(io::Error::new(ErrorKind::InvalidData, "noo"))
+                    Err(io::Error::new(ErrorKind::InvalidData, "noo"))
                 }
             },
             Err(e) if e.kind() == ErrorKind::InvalidData => Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "packet length not detected",
+                "invalid data for packet_length",
             )),
             Err(e) => Err(e),
         }?;
 
-        let mut buf = &mut vec![0u8; i32::from(&packet_len) as usize];
-        self.read_exact(&mut buf[packet_len..]).await?;
+        let mut buf = vec![0u8; i32::from(&packet_len) as usize];
 
-        let mut cur = Cursor::new();
+        self.read_exact(&mut buf).await?;
 
-        Ok(McPacketRaw {
-            inner: buf,
-            idx_id: packet_len,
-        })
+        todo!()
+
+        // Ok(McPacketRaw {})
     }
 }
 impl<R: AsyncRead> McPacketAsyncReadExt for R {}
@@ -54,8 +51,9 @@ pub trait McPacketAsyncWriteExt: AsyncWrite {
     where
         Self: Unpin,
     {
-        self.write(&packet.inner).await?;
-        Ok(())
+        // self.write(&packet.inner).await?;
+        todo!()
+        // Ok(())
     }
 }
 impl<W: AsyncWrite> McPacketAsyncWriteExt for W {}
