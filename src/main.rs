@@ -1,10 +1,15 @@
-use anyhow::Context;
+#![feature(absolute_path, io_error_more)]
+
+use clap::{error::ErrorKind, CommandFactory};
+use log::{debug, error, info, trace, warn};
+
+pub mod config;
+use config::ARGS;
+
+use crate::config::{Cli, Config};
 use async_channel::bounded as mpmc_bounded;
-use clap::Parser;
-use kite::config::{Args, Config};
-use notify::RecommendedWatcher;
-use once_cell::sync::OnceCell;
-use std::{net::SocketAddr, path::Path, process, sync::Arc};
+use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode::NonRecursive};
+use std::{net::SocketAddr, process, sync::Arc, time::Duration};
 use tokio::{
     fs,
     io::ErrorKind::*,
@@ -12,57 +17,127 @@ use tokio::{
     select,
 };
 
-mod watch;
-use watch::WatchManager;
+const DEBOUNCE_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    static ARGS: OnceCell<Args> = OnceCell::new();
-    let args: &'static Args = ARGS.get_or_init(|| Args::parse());
-    let mut watch_manager = WatchManager::<RecommendedWatcher>::new()
-        .context("Failed to create watcher (possibly due to platform-specific behavior)")?;
+    better_panic::install();
+    env_logger::builder()
+        .filter_level(ARGS.verbose.log_level_filter())
+        .init();
 
-    watch_manager.watch(&args.config_path);
+    let (_debouncer, rx) = {
+        let (tx, rx) = async_channel::unbounded();
+
+        let mut debouncer = new_debouncer(DEBOUNCE_TIMEOUT, None, move |maybe_events| {
+            match maybe_events {
+                Ok(events) => {
+                    // Err: As defined in main(), rx will never be closed unless .close() is manually called.
+                    tx.send_blocking(events).expect("rx closed unexpectedly");
+                }
+                Err(errors) => warn!("{:?}", errors),
+            };
+        })
+        .unwrap();
+
+        let parent = ARGS
+            .config_path
+            .parent()
+            // None: Occurs when user specifies a path that doesn't have parent
+            // TODO: Print a user-friendly text and exit
+            .unwrap_or_else(|| {
+                Cli::command()
+                    .error(ErrorKind::ValueValidation, "CONFIG doesn't have a parent")
+                    .exit()
+            });
+
+        trace!("config_path.parent() = {parent:?}");
+
+        debouncer
+            .watcher()
+            .watch(parent, NonRecursive)
+            // Err: Occurs when the directory is somehow not accessible
+            // See also: https://man7.org/linux/man-pages/man2/inotify_add_watch.2.html#ERRORS
+            .unwrap_or_else(|_| {
+                Cli::command()
+                    .error(
+                        ErrorKind::ValueValidation,
+                        "could not watch parent directory",
+                    )
+                    .exit()
+            });
+
+        (debouncer, rx)
+    };
 
     loop {
+        macro_rules! config_modification {
+            () => {
+                async {
+                    while let Ok(events) = rx.recv().await {
+                        trace!("{:?}, {:?}", events, ARGS.config_path);
+                        if events.iter().any(|event| *event.path == *ARGS.config_path) {
+                            break;
+                        }
+                    }
+                }
+            };
+        }
+
         macro_rules! reload {
             () => {{
-                eprintln!("[conf] change detected; reloading");
+                config_modification!().await;
+                info!("change detected; reloading");
                 continue;
             }};
         }
 
-        let config: Arc<Config> = match fs::read_to_string(&args.config_path).await {
+        let config: Arc<Config> = match fs::read_to_string(&ARGS.config_path).await {
             Ok(str) => match str.parse() {
                 Ok(config) => Arc::new(config),
                 Err(e) => {
-                    eprintln!("{e}");
+                    error!("parse: {e}");
                     reload!();
                 }
             },
-            Err(e) if matches!(e.kind(), NotFound,) => {
-                reload!();
-            }
-            Err(_) => todo!("to future me: please handle unexpected io errors :sob::sob::sob:"),
+            Err(e) => match e.kind() {
+                NotFound => {
+                    error!("not found; waiting");
+                    reload!();
+                }
+                IsADirectory => {
+                    error!("specified path is a directory");
+                    reload!();
+                }
+                _ => {
+                    error!("unexpected IO error while reading config file: {e:?}");
+                    process::exit(1);
+                }
+            },
         };
 
         // let watcher = args.config_path.watch(|_| true);
         let listener = TcpListener::bind(&config.bind_addr).await.unwrap();
         let (tx, rx) = mpmc_bounded(1);
 
+        debug!("{config:?}");
+
         loop {
             select! {
-                // _ = eye.recv() => {
-                //     println!("[conf] change detected; reloading");
-                //     tokio::spawn(async move { tx.send(HandlerMsg::RequestStop).await; });
-                //     break;
-                // }
+                () = config_modification!() => {
+                    info!("change detected; reloading");
+                    tokio::spawn(async move {
+                        let _ = tx.send(HandlerMsg::RequestStop).await;
+                    });
+                    break;
+                }
                 maybe_conn = listener.accept() => match maybe_conn {
                     Ok((conn, peer)) => {
-                        tokio::spawn(handle_connection(args, Arc::clone(&config), conn, peer, rx.clone()));
+                        info!("conn from {peer:?}");
+                        tokio::spawn(handle_connection(Arc::clone(&config), conn, peer, rx.clone()));
                     },
                     Err(e) => {
-                        eprintln!("[warn] fafafa - {e}");
+                        error!("accept: {e}");
                         continue;
                     }
                 }
@@ -77,12 +152,18 @@ enum HandlerMsg {
 
 #[allow(unused_variables, unused_mut)] // TODO: remove later
 async fn handle_connection(
-    args: &'static Args,
     config: Arc<Config>,
     mut client: TcpStream,
     peer: SocketAddr,
     msg_channel: async_channel::Receiver<HandlerMsg>,
 ) {
+    // use ozelot::{ClientState, Server};
+    // let mut o = Server::from_tcpstream(client.into_std().unwrap()).unwrap();
+    // o.set_clientstate(ClientState::Status);
+
+    // let ps = o.read().unwrap();
+    // trace!("{:?}", ps);
+
     // let packet = client.read_mc_packet()?;
     // let server = config.get(&packet);
     // let server = TcpStream::connect(server)?;

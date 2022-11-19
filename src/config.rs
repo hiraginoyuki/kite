@@ -1,20 +1,35 @@
-use std::{net::SocketAddr, path::PathBuf, str::FromStr};
-
+use arc_swap::ArcSwap;
 use atty::Stream;
-use clap::Parser;
+use clap::{
+    builder::{PathBufValueParser, TypedValueParser},
+    Parser,
+};
 use serde::Deserialize;
+use std::{io, net::SocketAddr};
+use std::{path::PathBuf, str::FromStr};
+
+use clap_verbosity_flag::Verbosity;
+
+use once_cell::sync::Lazy;
+pub static ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
 
 #[derive(Debug, Parser)]
-#[clap(version, about)]
-pub struct Args {
+#[clap(version)]
+pub struct Cli {
+    #[command(flatten)]
+    pub verbose: Verbosity,
+
+    /// Path to the configuration file
     #[clap(
-        short='c', long="config",
-        value_parser, value_name = "FILE",
+        short='c', long="config", value_name="FILE",
+        // Err: clap doesn't allow empty string which leaves us with
+        // only one way to Err in which std::env::current_dir() fails.
+        value_parser = PathBufValueParser::new().try_map(std::path::absolute),
         default_value_os_t = ("./config.toml").into()
     )]
     pub config_path: PathBuf,
 
-    /// Enable colored outputs even if stdout is not a tty
+    /// Enable colored output (defaults to whether stdin is a tty)
     #[clap(
         short='f', long="fancy",
         value_parser,
@@ -42,4 +57,14 @@ pub struct Config {
 pub struct Rule {
     pub host: String,
     pub backend: SocketAddr,
+}
+
+enum ConfigState<C: FromStr> {
+    Loaded(C),
+    IoError(io::Error),
+    ParseError(C::Err),
+}
+
+struct ConfigLoader<C: FromStr> {
+    inner: ArcSwap<ConfigState<C>>,
 }
