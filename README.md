@@ -18,7 +18,7 @@ cargo install --git https://github.com/hiraginoyuki/kite
 
 To use Kite, first configure it using a TOML file, and then run `kite`.
 
-| Option | Description | Default
+| Option | Description | Default |
 | --- | --- | --- |
 | -c, --config | Path to the config file. | `./kite.toml` |
 

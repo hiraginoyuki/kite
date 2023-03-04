@@ -15,4 +15,4 @@ port = 25565 # default
 [[rule]]
 match = "mc.hypixel.net"
 host = "209.222.114.76"
-port = 25565 #defalt
+port = 25565 # default
