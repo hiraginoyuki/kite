@@ -1,42 +1,51 @@
 use anyhow::Context;
 use clap::Parser;
-use config::{Args, Config};
-use varivari::{VarIntReadExt, VarIntWriteExt};
+use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
+use varivari::{VarIntAsyncReadExt, VarIntAsyncWriteExt};
+use trust_dns_resolver::TokioAsyncResolver;
+use once_cell::sync::Lazy;
 
-use std::fs;
-use std::io::{self, Cursor, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Cursor;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::fs;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 mod config;
+use config::{Args, Config};
 
 /// for pseudo code and discussion
 macro_rules! ignore {
     ($($tt:tt)*) => {};
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
-    let config = fs::read_to_string(args.config)
+    let config: Config = fs::read_to_string(args.config)
+        .await
         .unwrap()
-        .parse::<Config>()
+        .parse()
         .unwrap();
 
-    if let Err(err) = listen(config) {
+    if let Err(err) = listen(config).await {
         eprintln!("error: {}", err);
         std::process::exit(1);
     };
 }
 
-fn listen(config: Config) -> anyhow::Result<()> {
+async fn listen(config: Config) -> anyhow::Result<()> {
+    let config = Arc::new(config);
     let listener =
-        TcpListener::bind(config.listen_addr).context("failed to bind to listen address")?;
+        TcpListener::bind(SocketAddr::from(config.listen_addr.clone())).await.context("failed to bind to listen address")?;
 
-    while let Ok((connection, _)) = listener.accept() {
+    while let Ok((connection, _)) = listener.accept().await {
         let config = config.clone();
-        std::thread::spawn(move || handle_connection(connection, config));
+        tokio::spawn(handle_connection(connection, config));
     }
 
-    Ok(())
+    todo!()
 }
 
 ignore![
@@ -47,33 +56,37 @@ ignore![
     0110_0011, 1101_1101, // port (normal u16), 25565
 ];
 
-fn handle_connection(mut client: TcpStream, config: Config) {
-    let packet_len = client.read_varint().unwrap();
+const RESOLVER: Lazy<TokioAsyncResolver> = Lazy::new(|| {
+    TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default()).unwrap()
+});
+
+async fn handle_connection(mut client: TcpStream, config: Arc<Config>) {
+    let packet_len = client.read_varint().await.unwrap();
 
     let packet_raw = {
         let packet_len: usize = i32::from(packet_len.clone()).try_into().unwrap();
         dbg!(packet_len);
         let mut packet_raw = vec![0; packet_len];
-        client.read_exact(&mut packet_raw).unwrap();
+        client.read_exact(&mut packet_raw).await.unwrap();
 
         dbg!(packet_raw)
     };
 
     let mut reader = Cursor::new(&packet_raw);
 
-    let packet_id: i32 = reader.read_varint().unwrap().into();
-    let protocol_version: i32 = reader.read_varint().unwrap().into();
+    let packet_id: i32 = reader.read_varint().await.unwrap().into();
+    let protocol_version: i32 = reader.read_varint().await.unwrap().into();
     dbg!(packet_id);
     dbg!(protocol_version);
 
     let hostname: String = {
         // variable length string
-        let str_len: i32 = reader.read_varint().unwrap().into();
+        let str_len: i32 = reader.read_varint().await.unwrap().into();
         dbg!(str_len);
         let str_len = dbg!(usize::try_from(str_len).unwrap());
 
         let mut str_body = vec![0; str_len];
-        reader.read_exact(&mut str_body).unwrap();
+        reader.read_exact(&mut str_body).await.unwrap();
 
         String::from_utf8_lossy(&str_body).into()
     };
@@ -82,37 +95,50 @@ fn handle_connection(mut client: TcpStream, config: Config) {
 
     let backend_rule = config
         .rules
-        .into_iter()
+        .iter()
         .find(|rule| rule.matcher == hostname)
         .unwrap();
-    let mut backend = TcpStream::connect(backend_rule.addr).unwrap();
+    
+    let address = RESOLVER
+        .lookup_ip(&backend_rule.host)
+        .await
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap();
 
-    backend.write_varint(&packet_len).unwrap();
-    backend.write_all(&packet_raw).unwrap();
+    let mut backend = TcpStream::connect((address, backend_rule.port)).await.unwrap();
 
-    client.set_nonblocking(true).unwrap();
-    backend.set_nonblocking(true).unwrap();
+    backend.write_varint(&packet_len).await.unwrap();
+    backend.write_all(&packet_raw).await.unwrap();
 
-    let mut buf = [0u8; 1048576];
-    loop {
-        let len = match client.read(&mut buf) {
-            Ok(len) => len,
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => 0,
-            err => err.unwrap(),
-        };
-        backend.write_all(&buf[..len]).unwrap();
-        if len != 0 {
-            println!("{len} bytes sent to backend");
-        }
+    tokio::io::copy_bidirectional(&mut client, &mut backend).await.unwrap();
 
-        let len = match backend.read(&mut buf) {
-            Ok(len) => len,
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => 0,
-            err => err.unwrap(),
-        };
-        client.write_all(&buf[..len]).unwrap();
-        if len != 0 {
-            println!("{len} bytes sent to client");
+    ignore! {
+        client.set_nonblocking(true).unwrap();
+        backend.set_nonblocking(true).unwrap();
+
+        let mut buf = [0u8; 1048576];
+        loop {
+            let len = match client.read(&mut buf) {
+                Ok(len) => len,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => 0,
+                err => err.unwrap(),
+            };
+            backend.write_all(&buf[..len]).unwrap();
+            if len != 0 {
+                println!("{len} bytes sent to backend");
+            }
+
+            let len = match backend.read(&mut buf) {
+                Ok(len) => len,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => 0,
+                err => err.unwrap(),
+            };
+            client.write_all(&buf[..len]).unwrap();
+            if len != 0 {
+                println!("{len} bytes sent to client");
+            }
         }
     }
 }
@@ -195,5 +221,5 @@ ignore! {
                 stream1.write(&buf).await.unwrap();
             }
         }
-     }
+    }
 }

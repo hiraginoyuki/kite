@@ -1,17 +1,18 @@
-listen_addr = "0.0.0.0:25565"
+[listen]
+host = "0.0.0.0" # default
+port = 25565 # default
 
 [[rule]]
 match = "shiina.family"
-addr = "127.0.0.1:25566"
-
-[[rule]]
-match = "mc.chihuyu.love"
-addr = "127.0.0.1:25567"
+host = "118.157.138.154"
+port = 25565 # default
 
 [[rule]]
 match = "testoo"
-addr = "118.157.138.154:25565"
+host = "118.157.138.154"
+port = 25565 # default
 
 [[rule]]
 match = "mc.hypixel.net"
-addr = "209.222.114.76:25565"
+host = "209.222.114.76"
+port = 25565 #defalt

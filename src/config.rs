@@ -1,33 +1,65 @@
 use clap::Parser;
 use serde::Deserialize;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
 /* e.g.
-    listen_addr = "160.16.63.79:25565"
+    [listen]
+    host = "0.0.0.0" # default
+    port = 25565 # default
 
     [[rule]]
-    match = "shiina.family"
-    addr = "127.0.0.1:25566"
+    match = "vanilla.shiina.family"
+    host = "127.0.0.1"
+    port = 25566
 
     [[rule]]
-    match = "mc.chihuyu.love"
-    addr = "127.0.0.1:25567"
+    match = "forge.shiina.family"
+    host = "160.16.63.79"
+    port = 25567
+
+    [[rule]]
+    match = "hypixel.shiina.family"
+    host = "mc.hypixel.net"
+
+    [[rule]]
+    match = "test.shiina.family"
+    host = "backend1"
 */
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Debug)]
 pub(crate) struct Config {
-    pub listen_addr: SocketAddr, // Address to listen; e.g. 160.16.63.79:25565
+    #[serde(rename = "listen")]
+    pub listen_addr: ListenAddr, // Address to listen; e.g. 160.16.63.79:25565
     #[serde(rename = "rule")]
     pub rules: Vec<Rule>,
 }
 
-#[derive(Deserialize, Clone)]
+const fn default_host() -> IpAddr { IpAddr::V4(Ipv4Addr::UNSPECIFIED) }
+const fn default_port() -> u16 { 25565 }
+
+#[derive(Deserialize, Debug, Clone)]
+pub(crate) struct ListenAddr {
+    #[serde(default = "default_host")]
+    pub host: IpAddr,
+    #[serde(default = "default_port")]
+    pub port: u16,
+}
+
+impl From<ListenAddr> for SocketAddr {
+    fn from(ListenAddr { host, port }: ListenAddr) -> Self {
+        SocketAddr::new(host, port)
+    }
+}
+
+#[derive(Deserialize, Debug)]
 pub(crate) struct Rule {
     #[serde(rename = "match")]
     pub matcher: String,
-    pub addr: SocketAddr,
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
 }
 
 impl FromStr for Config {
