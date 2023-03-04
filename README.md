@@ -2,7 +2,7 @@
 > Kite is a simple reverse-proxy for Minecraft servers.
 
 ## Features
-Kite allows you to configure it to:
+Kite can be configured to:
 - restrict access to a specific domain for connecting to the server, and
 - route connections to different backend servers based on the domain name used.
 
