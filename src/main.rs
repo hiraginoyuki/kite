@@ -56,7 +56,7 @@ ignore![
     0110_0011, 1101_1101, // port (normal u16), 25565
 ];
 
-const RESOLVER: Lazy<TokioAsyncResolver> = Lazy::new(|| {
+static RESOLVER: Lazy<TokioAsyncResolver> = Lazy::new(|| {
     TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default()).unwrap()
 });
 
