@@ -1,9 +1,9 @@
 use anyhow::Context;
 use clap::Parser;
-use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
-use varivari::{VarIntAsyncReadExt, VarIntAsyncWriteExt};
-use trust_dns_resolver::TokioAsyncResolver;
 use once_cell::sync::Lazy;
+use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
+use trust_dns_resolver::TokioAsyncResolver;
+use varivari::{VarIntAsyncReadExt, VarIntAsyncWriteExt};
 
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -37,8 +37,9 @@ async fn main() {
 
 async fn listen(config: Config) -> anyhow::Result<()> {
     let config = Arc::new(config);
-    let listener =
-        TcpListener::bind(SocketAddr::from(config.listen_addr.clone())).await.context("failed to bind to listen address")?;
+    let listener = TcpListener::bind(SocketAddr::from(config.listen_addr.clone()))
+        .await
+        .context("failed to bind to listen address")?;
 
     while let Ok((connection, _)) = listener.accept().await {
         let config = config.clone();
@@ -98,7 +99,7 @@ async fn handle_connection(mut client: TcpStream, config: Arc<Config>) {
         .iter()
         .find(|rule| rule.matcher == hostname)
         .unwrap();
-    
+
     let address = RESOLVER
         .lookup_ip(&backend_rule.host)
         .await
@@ -107,12 +108,16 @@ async fn handle_connection(mut client: TcpStream, config: Arc<Config>) {
         .next()
         .unwrap();
 
-    let mut backend = TcpStream::connect((address, backend_rule.port)).await.unwrap();
+    let mut backend = TcpStream::connect((address, backend_rule.port))
+        .await
+        .unwrap();
 
     backend.write_varint(&packet_len).await.unwrap();
     backend.write_all(&packet_raw).await.unwrap();
 
-    tokio::io::copy_bidirectional(&mut client, &mut backend).await.unwrap();
+    tokio::io::copy_bidirectional(&mut client, &mut backend)
+        .await
+        .unwrap();
 
     ignore! {
         client.set_nonblocking(true).unwrap();

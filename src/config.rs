@@ -36,8 +36,12 @@ pub(crate) struct Config {
     pub rules: Vec<Rule>,
 }
 
-const fn default_host() -> IpAddr { IpAddr::V4(Ipv4Addr::UNSPECIFIED) }
-const fn default_port() -> u16 { 25565 }
+const fn default_host() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+}
+const fn default_port() -> u16 {
+    25565
+}
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ListenAddr {
