@@ -50,6 +50,7 @@ port = 25567
 [[rule]]
 match = "test.example.com"
 host = "purpur_test" # locally resolvable hostname
+port = 25565 # default, can be omitted
 ```
 
 #### Note
